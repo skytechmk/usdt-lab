@@ -1,0 +1,11 @@
+{
+  "name": "usdt-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flash-USDT fraud mechanics research lab (testnet only) + defensive verifier",
+  "dependencies": {
+    "express": "^4.21.2",
+    "solc": "^0.8.30",
+    "tronweb": "^6.0.0"
+  }
+}

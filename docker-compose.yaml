@@ -1,0 +1,11 @@
+services:
+  lab:
+    build: ./app
+    ports:
+      - "8080:8080"
+    volumes:
+      - lab-data:/data
+    restart: unless-stopped
+
+volumes:
+  lab-data: {}

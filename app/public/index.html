@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>USDT Fraud Mechanics Lab</title>
+<style>
+  :root { --bg:#0b0e14; --card:#12161f; --line:#1f2633; --txt:#dbe2ee; --dim:#7d8799; --acc:#4f9cf9; --warn:#f0a04b; --bad:#e5534b; --ok:#3fb950; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,monospace; background:var(--bg); color:var(--txt); }
+  header { padding:22px 28px; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; font-weight:600; }
+  .sub { color:var(--dim); font-size:12px; margin-top:4px; }
+  main { max-width:960px; margin:0 auto; padding:24px; display:grid; gap:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px; }
+  .card h2 { margin:0 0 6px; font-size:14px; color:var(--acc); text-transform:uppercase; letter-spacing:.08em; }
+  .card p { color:var(--dim); margin:4px 0 14px; font-size:13px; }
+  code { background:#0d1117; padding:2px 6px; border-radius:4px; font-size:12px; word-break:break-all; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 18px; font-size:13px; cursor:pointer; }
+  button:disabled { opacity:.4; cursor:default; }
+  input { background:#0d1117; border:1px solid var(--line); color:var(--txt); border-radius:6px; padding:9px 12px; font-size:13px; width:100%; }
+  .row { display:flex; gap:10px; }
+  .row input { flex:1; }
+  .out { margin-top:14px; background:#0d1117; border:1px solid var(--line); border-radius:8px; padding:14px; font-size:12px; white-space:pre-wrap; word-break:break-all; min-height:20px; display:none; }
+  .tag { display:inline-block; padding:2px 10px; border-radius:12px; font-size:11px; font-weight:600; }
+  .t-ok{background:rgba(63,185,80,.15);color:var(--ok)} .t-warn{background:rgba(240,160,75,.15);color:var(--warn)} .t-bad{background:rgba(229,83,75,.15);color:var(--bad)} .t-info{background:rgba(79,156,249,.15);color:var(--acc)}
+  .tl { list-style:none; padding:0; margin:10px 0 0; }
+  .tl li { padding:6px 0 6px 22px; position:relative; border-left:1px solid var(--line); margin-left:8px; }
+  .tl li::before { content:''; position:absolute; left:-5px; top:11px; width:9px; height:9px; border-radius:50%; background:var(--acc); }
+  .tl b { color:var(--warn); font-weight:600; margin-right:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>USDT Fraud Mechanics Lab</h1>
+  <div class="sub">Internal research — Nile testnet only. Demonstrates why "flash USDT" is a display trick, not a transfer.</div>
+</header>
+<main>
+  <div class="card">
+    <h2>Lab status</h2>
+    <p>Testnet wallet for the lab. Fund it once via the Nile faucet to enable modules 1–2.</p>
+    <div id="status">loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>Module 2 — Lookalike token</h2>
+    <p>Deploy a TRC-20 with identical metadata (<code>Tether USD / USDT / 6 decimals</code>) on Nile. Different contract address = the whole trick.</p>
+    <button id="btnClone" onclick="deployClone()">Deploy lookalike</button>
+    <div class="out" id="cloneOut"></div>
+  </div>
+
+  <div class="card">
+    <h2>Module 1 — Mempool ghost lifecycle</h2>
+    <p>Broadcast a transfer with deliberately insufficient energy — accepted into the mempool, explorer shows PENDING, then execution fails and nothing moved. The exact "flash" vector.</p>
+    <div class="row">
+      <input id="victim" placeholder="recipient address (blank = generate fresh)">
+      <input id="amount" type="number" value="5000" style="width:110px" title="fake amount">
+      <button id="btnGhost" onclick="ghost()">Send ghost</button>
+    </div>
+    <div class="out" id="ghostOut"></div>
+  </div>
+
+  <div class="card">
+    <h2>Mainnet tryout — real transfer between lab wallets</h2>
+    <p>Two lab-generated mainnet wallets (keys in the container's data volume). Fund wallet A with ~1 USDT + ~30 TRX, then send a real 1 USDT A→B. Watch wallet B show the balance <b>before</b> finality — the same premature display flash-USDT abuses, proven with a genuine transfer.</p>
+    <div class="row">
+      <button onclick="mkWallets()">Create wallets</button>
+      <button onclick="walletStatus()">Refresh balances</button>
+      <button id="btnDemo" onclick="demoSend()">Send 1 USDT A→B</button>
+    </div>
+    <div class="out" id="walletOut"></div>
+  </div>
+
+  <div class="card">
+    <h2>Red-team suite — attack the verifier</h2>
+    <p>Fires real attack transactions at the credit-check pipeline: testnet ghost, <b>real counterfeit USDT txs found on mainnet</b>, failed transfers, wrong-recipient real transfers — plus a positive control. Any attack that slips through = your code is screwed. That's the test.</p>
+    <button id="btnSuite" onclick="suite()">Run attack suite</button>
+    <div class="out" id="suiteOut"></div>
+  </div>
+
+  <div class="card">
+    <h2>Module 3 — Verifier (defensive)</h2>
+    <p>Paste any txid. Reports finality + whether the token contract is the real USDT. A flash tx is always <code>NOT_ON_CHAIN</code>, <code>PENDING_UNCONFIRMED</code>, <code>FAILED</code>, or <code>COUNTERFEIT_TOKEN</code>.</p>
+    <div class="row">
+      <input id="txid" placeholder="transaction id">
+      <select id="net" style="background:#0d1117;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:9px">
+        <option value="main">mainnet</option><option value="nile">nile</option>
+      </select>
+      <button onclick="verify()">Verify</button>
+    </div>
+    <div class="out" id="verifyOut"></div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const show = (id, html) => { $(id).style.display='block'; $(id).innerHTML=html; };
+
+async function status() {
+  const s = await fetch('/api/status').then(r=>r.json());
+  $('status').innerHTML = `
+    <div>address: <code>${s.address}</code></div>
+    <div>TRX balance: <b>${s.trxBalance}</b> ${s.funded?'<span class="tag t-ok">FUNDED</span>':'<span class="tag t-warn">NEEDS FAUCET</span>'}</div>
+    <div>faucet: <code>${s.faucet}</code></div>
+    ${s.clone?`<div>clone token: <code>${s.clone.address}</code> <a href="${s.clone.explorer}" target="_blank" style="color:var(--acc)">explorer</a></div>`:''}`;
+}
+status(); setInterval(status, 15000);
+
+async function deployClone() {
+  $('btnClone').disabled = true;
+  show('cloneOut', 'compiling + deploying…');
+  const r = await fetch('/api/clone', {method:'POST'}).then(r=>r.json());
+  $('btnClone').disabled = false;
+  if (r.error) return show('cloneOut', `<span class="tag t-bad">ERROR</span> ${r.error}`);
+  show('cloneOut', `<span class="tag t-ok">DEPLOYED</span>
+name: <code>${r.name}</code> symbol: <code>${r.symbol}</code>
+contract: <code>${r.address}</code>
+explorer: <a href="${r.explorer}" target="_blank" style="color:var(--acc)">${r.explorer}</a>
+${r.note}`);
+  status();
+}
+
+async function ghost() {
+  $('btnGhost').disabled = true;
+  const r = await fetch('/api/ghost', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({victim: $('victim').value || undefined, amount: Number($('amount').value)})}).then(r=>r.json());
+  if (r.error) { $('btnGhost').disabled=false; return show('ghostOut', `<span class="tag t-bad">ERROR</span> ${r.error}`); }
+  show('ghostOut', `txid: <code>${r.txid}</code>
+victim: <code>${r.victim}</code>
+explorer: <a href="${r.explorer}" target="_blank" style="color:var(--acc)">${r.explorer}</a>
+<ul class="tl" id="tl"></ul>`);
+  const poll = setInterval(async () => {
+    const g = await fetch('/api/ghost/'+r.txid).then(x=>x.json());
+    $('tl').innerHTML = (g.timeline||[]).map(e=>`<li><b>+${e.t}s</b>${e.event}</li>`).join('');
+    if (g.status && g.status!=='broadcast' && g.status!=='unknown') { clearInterval(poll); $('btnGhost').disabled=false; }
+  }, 2000);
+}
+
+async function mkWallets() {
+  const r = await fetch('/api/wallets', {method:'POST'}).then(r=>r.json());
+  if (r.error) return show('walletOut', `<span class="tag t-bad">ERROR</span> ${r.error}`);
+  show('walletOut', `<span class="tag t-ok">WALLETS READY</span>
+A: <code>${r.A}</code>
+B: <code>${r.B}</code>
+${r.note||''}`);
+  walletStatus();
+}
+
+async function walletStatus() {
+  const w = await fetch('/api/wallets').then(r=>r.json());
+  if (!w.created) return;
+  show('walletOut', `A: <code>${w.A.address}</code> — ${w.A.usdt} USDT, ${w.A.trx} TRX
+B: <code>${w.B.address}</code> — ${w.B.usdt} USDT, ${w.B.trx} TRX`);
+}
+
+async function demoSend() {
+  $('btnDemo').disabled = true;
+  const r = await fetch('/api/demo/send', {method:'POST'}).then(r=>r.json());
+  if (r.error) { $('btnDemo').disabled=false; return show('walletOut', `<span class="tag t-bad">ERROR</span> ${r.error}`); }
+  show('walletOut', `txid: <code>${r.txid}</code>
+explorer: <a href="${r.explorer}" target="_blank" style="color:var(--acc)">${r.explorer}</a>
+<ul class="tl" id="dtl"></ul>`);
+  const poll = setInterval(async () => {
+    const g = await fetch('/api/demo/'+r.txid).then(x=>x.json());
+    $('dtl').innerHTML = (g.timeline||[]).map(e=>`<li><b>+${e.t}s</b>${e.event}</li>`).join('');
+    if (g.status && g.status!=='broadcast' && g.status!=='unknown') { clearInterval(poll); $('btnDemo').disabled=false; walletStatus(); }
+  }, 2000);
+}
+
+async function suite() {
+  $('btnSuite').disabled = true;
+  show('suiteOut', 'running attacks — fetching live scammer txs from mainnet…');
+  const r = await fetch('/api/attack-suite', {method:'POST'}).then(r=>r.json());
+  $('btnSuite').disabled = false;
+  if (r.error) return show('suiteOut', `<span class="tag t-bad">ERROR</span> ${r.error}`);
+  const rows = r.results.map(t => `
+    <div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:6px">
+      <span class="tag ${t.pass?'t-ok':'t-bad'}">${t.pass?'BLOCKED ✓':'SLIPPED THROUGH ✗'}</span>
+      <b>${t.label}</b> <span style="color:var(--dim)">(expected credit=${t.expected}, got credit=${t.got})</span>
+      <div style="margin-top:6px"><code>${t.txid}</code></div>
+      ${t.checks.map(c=>`<div style="margin-top:4px"><span class="tag ${c.pass?'t-ok':'t-bad'}">${c.pass?'✓':'✗'} ${c.name}</span> <span style="color:var(--dim)">${c.detail}</span></div>`).join('')}
+    </div>`).join('');
+  show('suiteOut', `<h3 style="margin:0 0 10px;font-size:14px">${r.summary}</h3>${rows}`);
+}
+
+async function verify() {
+  const net = $('net').value;
+  const r = await fetch('/api/verify/'+$('txid').value+'?network='+net).then(r=>r.json());
+  if (r.error) return show('verifyOut', `<span class="tag t-bad">ERROR</span> ${r.error}`);
+  const cls = r.verdict==='REAL_USDT'?'t-ok':(r.verdict==='PENDING_UNCONFIRMED'?'t-warn':'t-bad');
+  show('verifyOut', `<span class="tag ${cls}">${r.verdict}</span>  ${r.detail}
+${r.contract?`token contract: <code>${r.contract}</code>`:''}
+explorer: <a href="${r.explorer}" target="_blank" style="color:var(--acc)">${r.explorer}</a>`);
+}
+</script>
+</body>
+</html>
